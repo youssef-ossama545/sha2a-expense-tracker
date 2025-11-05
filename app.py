@@ -7,8 +7,8 @@ from google.oauth2.service_account import Credentials
 # ============================================================================
 # CONFIGURATION
 # ============================================================================
-ROOMMATES = ["Alex", "Jordan", "Sam", "Taylor"]  # ✏️ CHANGE THESE NAMES
-CURRENCY = "USD"  # ✏️ Change if needed
+ROOMMATES = ["SAFI", "GANDOFLY", "LOLO", "JOJO", "BODY", "PAKI"]
+CURRENCY = "EGP" 
 
 # ============================================================================
 # GOOGLE SHEETS CONNECTION
