@@ -1,12 +1,75 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
+import gspread
+from google.oauth2.service_account import Credentials
 
 # ============================================================================
 # CONFIGURATION
 # ============================================================================
-ROOMMATES = ["Safi", "Gandofly", "Lolo", "Jojo", "Body", "Paki"]
-CURRENCY = "EGP" 
+ROOMMATES = ["Alex", "Jordan", "Sam", "Taylor"]  # ✏️ CHANGE THESE NAMES
+CURRENCY = "USD"  # ✏️ Change if needed
+
+# ============================================================================
+# GOOGLE SHEETS CONNECTION
+# ============================================================================
+@st.cache_resource
+def connect_to_sheet():
+    """Connect to Google Sheets."""
+    try:
+        credentials = Credentials.from_service_account_info(
+            st.secrets["gcp_service_account"],
+            scopes=[
+                "https://www.googleapis.com/auth/spreadsheets",
+                "https://www.googleapis.com/auth/drive"
+            ]
+        )
+        client = gspread.authorize(credentials)
+        sheet_id = st.secrets["sheets"]["id"]
+        sheet = client.open_by_key(sheet_id)
+        return sheet
+    except Exception as e:
+        st.error(f"❌ Error connecting to Google Sheets: {e}")
+        return None
+
+def read_expenses(sheet):
+    """Read expenses from Google Sheet."""
+    try:
+        worksheet = sheet.worksheet("Expenses")
+        data = worksheet.get_all_records()
+        return data
+    except:
+        return []
+
+def read_payments(sheet):
+    """Read payments from Google Sheet."""
+    try:
+        worksheet = sheet.worksheet("Payments")
+        data = worksheet.get_all_records()
+        return data
+    except:
+        return []
+
+def add_expense(sheet, date, description, payer, amount, shared_with, notes):
+    """Add expense to Google Sheet."""
+    try:
+        worksheet = sheet.worksheet("Expenses")
+        shared_str = ", ".join(shared_with)
+        worksheet.append_row([date, description, payer, float(amount), shared_str, notes])
+        return True
+    except Exception as e:
+        st.error(f"Error: {e}")
+        return False
+
+def add_payment(sheet, date, from_person, to_person, amount, notes):
+    """Add payment to Google Sheet."""
+    try:
+        worksheet = sheet.worksheet("Payments")
+        worksheet.append_row([date, from_person, to_person, float(amount), notes])
+        return True
+    except Exception as e:
+        st.error(f"Error: {e}")
+        return False
 
 # ============================================================================
 # CUSTOM CSS
@@ -25,13 +88,6 @@ def apply_custom_css():
             text-align: center;
             margin-bottom: 2rem;
         }
-        .metric-card {
-            background: white;
-            padding: 1.5rem;
-            border-radius: 10px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-            border-left: 4px solid #667eea;
-        }
         .balance-positive { color: #28a745; font-weight: bold; }
         .balance-negative { color: #dc3545; font-weight: bold; }
         .balance-zero { color: #6c757d; font-weight: bold; }
@@ -39,48 +95,40 @@ def apply_custom_css():
     """, unsafe_allow_html=True)
 
 # ============================================================================
-# SESSION STATE INITIALIZATION
-# ============================================================================
-def init_session_state():
-    if "expenses" not in st.session_state:
-        st.session_state.expenses = []
-    if "payments" not in st.session_state:
-        st.session_state.payments = []
-
-# ============================================================================
 # CALCULATION FUNCTIONS
 # ============================================================================
-def calculate_balances():
+def calculate_balances(expenses, payments):
     """Calculate balances with selective sharing."""
     balances = {person: 0.0 for person in ROOMMATES}
     
-    # Process expenses
-    for expense in st.session_state.expenses:
-        payer = expense["payer"]
-        amount = expense["amount"]
-        shared_with = expense["shared_with"]
+    for expense in expenses:
+        payer = expense["Payer"]
+        amount = float(expense["Amount"])
+        shared_str = expense["Shared With"]
+        shared_with = [s.strip() for s in shared_str.split(",")] if shared_str else []
         
-        # Split amount among people who shared this expense
-        split_amount = amount / len(shared_with)
-        
-        # Payer gets credited for full amount
-        balances[payer] += amount
-        
-        # Everyone who shared pays their share
-        for person in shared_with:
-            balances[person] -= split_amount
+        if len(shared_with) > 0:
+            split_amount = amount / len(shared_with)
+            balances[payer] += amount
+            
+            for person in shared_with:
+                if person in balances:
+                    balances[person] -= split_amount
     
-    # Process payments
-    for payment in st.session_state.payments:
-        balances[payment["from"]] += payment["amount"]
-        balances[payment["to"]] -= payment["amount"]
+    for payment in payments:
+        from_person = payment["From"]
+        to_person = payment["To"]
+        amount = float(payment["Amount"])
+        
+        if from_person in balances:
+            balances[from_person] += amount
+        if to_person in balances:
+            balances[to_person] -= amount
     
     return balances
 
-def calculate_settlement():
-    """Calculate who owes whom."""
-    balances = calculate_balances()
-    
+def calculate_settlement(balances):
+    """Calculate settlement plan."""
     creditors = []
     debtors = []
     
@@ -99,7 +147,6 @@ def calculate_settlement():
     while i < len(debtors) and j < len(creditors):
         debtor = debtors[i]
         creditor = creditors[j]
-        
         transfer = min(debtor["amount"], creditor["amount"])
         
         if transfer > 0.01:
@@ -130,69 +177,62 @@ def main():
     )
     
     apply_custom_css()
-    init_session_state()
     
-    # Header
     st.markdown("""
     <div class="main-header">
         <h1>🏠 Roommate Expense Tracker</h1>
-        <p>Split expenses fairly among roommates</p>
+        <p>Split expenses fairly with Google Sheets sync</p>
     </div>
     """, unsafe_allow_html=True)
     
-    # Tabs
-    tab1, tab2, tab3, tab4 = st.tabs([
-        "📊 Dashboard", 
-        "➕ Add Expense", 
-        "💸 Add Payment",
-        "📜 History"
-    ])
+    sheet = connect_to_sheet()
+    
+    if not sheet:
+        st.error("❌ Cannot connect to Google Sheets. Check your configuration.")
+        st.stop()
+    
+    expenses = read_expenses(sheet)
+    payments = read_payments(sheet)
+    balances = calculate_balances(expenses, payments)
+    settlements = calculate_settlement(balances)
+    
+    tab1, tab2, tab3, tab4 = st.tabs(["📊 Dashboard", "➕ Add Expense", "💸 Add Payment", "📜 History"])
     
     # ========================================================================
     # TAB 1: DASHBOARD
     # ========================================================================
     with tab1:
-        balances = calculate_balances()
-        settlements = calculate_settlement()
-        
-        # Summary metrics
         col1, col2, col3 = st.columns(3)
         
-        total_expenses = sum(e["amount"] for e in st.session_state.expenses)
-        total_payments = sum(p["amount"] for p in st.session_state.payments)
+        total_expenses = sum(float(e["Amount"]) for e in expenses)
+        total_payments = sum(float(p["Amount"]) for p in payments)
         
         with col1:
             st.metric("Total Expenses", f"{CURRENCY} {total_expenses:.2f}")
         with col2:
             st.metric("Total Payments", f"{CURRENCY} {total_payments:.2f}")
         with col3:
-            st.metric("Transactions", len(st.session_state.expenses) + len(st.session_state.payments))
+            st.metric("Transactions", len(expenses) + len(payments))
         
         st.markdown("---")
-        
-        # Balances
         st.subheader("💰 Current Balances")
         
         cols = st.columns(len(ROOMMATES))
         for i, person in enumerate(ROOMMATES):
             balance = balances[person]
             with cols[i]:
+                st.markdown(f"**{person}**")
                 if balance > 0.01:
-                    st.markdown(f"**{person}**")
                     st.markdown(f'<p class="balance-positive">+{balance:.2f} {CURRENCY}</p>', unsafe_allow_html=True)
                     st.caption("Is owed")
                 elif balance < -0.01:
-                    st.markdown(f"**{person}**")
                     st.markdown(f'<p class="balance-negative">{balance:.2f} {CURRENCY}</p>', unsafe_allow_html=True)
                     st.caption("Owes")
                 else:
-                    st.markdown(f"**{person}**")
                     st.markdown(f'<p class="balance-zero">0.00 {CURRENCY}</p>', unsafe_allow_html=True)
                     st.caption("Settled")
         
         st.markdown("---")
-        
-        # Settlement plan
         st.subheader("🔄 Settlement Plan")
         
         if not settlements:
@@ -217,8 +257,6 @@ def main():
             
             with col2:
                 expense_amount = st.number_input(f"Amount ({CURRENCY})", min_value=0.0, step=0.01)
-                
-                # ✨ KEY FEATURE: Select who shares this expense
                 st.markdown("**Who shares this expense?**")
                 shared_with = []
                 for person in ROOMMATES:
@@ -226,7 +264,6 @@ def main():
                         shared_with.append(person)
             
             expense_notes = st.text_area("Notes (optional)")
-            
             submit = st.form_submit_button("💾 Add Expense")
             
             if submit:
@@ -235,21 +272,15 @@ def main():
                 elif expense_amount <= 0:
                     st.error("Amount must be positive")
                 elif len(shared_with) == 0:
-                    st.error("Select at least one person to share this expense")
+                    st.error("Select at least one person")
                 else:
-                    st.session_state.expenses.append({
-                        "date": expense_date.strftime("%Y-%m-%d"),
-                        "description": expense_description,
-                        "payer": expense_payer,
-                        "amount": expense_amount,
-                        "shared_with": shared_with,
-                        "notes": expense_notes
-                    })
-                    
-                    split = expense_amount / len(shared_with)
-                    st.success(f"✅ Expense added! {expense_payer} paid {expense_amount:.2f} {CURRENCY}, split {split:.2f} each among {', '.join(shared_with)}")
-                    st.balloons()
-                    st.rerun()
+                    date_str = expense_date.strftime("%Y-%m-%d")
+                    if add_expense(sheet, date_str, expense_description, expense_payer, 
+                                   expense_amount, shared_with, expense_notes):
+                        split = expense_amount / len(shared_with)
+                        st.success(f"✅ Added! {expense_payer} paid {expense_amount:.2f} {CURRENCY}, split {split:.2f} each")
+                        st.balloons()
+                        st.rerun()
     
     # ========================================================================
     # TAB 3: ADD PAYMENT
@@ -269,7 +300,6 @@ def main():
                 payment_amount = st.number_input(f"Amount ({CURRENCY})", min_value=0.0, step=0.01)
             
             payment_notes = st.text_area("Notes (optional)")
-            
             submit = st.form_submit_button("💾 Record Payment")
             
             if submit:
@@ -278,16 +308,11 @@ def main():
                 elif payment_amount <= 0:
                     st.error("Amount must be positive")
                 else:
-                    st.session_state.payments.append({
-                        "date": payment_date.strftime("%Y-%m-%d"),
-                        "from": payment_from,
-                        "to": payment_to,
-                        "amount": payment_amount,
-                        "notes": payment_notes
-                    })
-                    
-                    st.success(f"✅ Payment recorded! {payment_from} paid {payment_amount:.2f} {CURRENCY} to {payment_to}")
-                    st.rerun()
+                    date_str = payment_date.strftime("%Y-%m-%d")
+                    if add_payment(sheet, date_str, payment_from, payment_to, 
+                                   payment_amount, payment_notes):
+                        st.success(f"✅ Payment recorded! {payment_from} paid {payment_amount:.2f} {CURRENCY} to {payment_to}")
+                        st.rerun()
     
     # ========================================================================
     # TAB 4: HISTORY
@@ -297,34 +322,25 @@ def main():
         
         with col1:
             st.subheader("📝 Expense History")
-            if st.session_state.expenses:
-                for i, exp in enumerate(reversed(st.session_state.expenses), 1):
-                    with st.expander(f"{exp['date']} - {exp['description']} ({exp['amount']:.2f} {CURRENCY})"):
-                        st.write(f"**Paid by:** {exp['payer']}")
-                        st.write(f"**Shared by:** {', '.join(exp['shared_with'])}")
-                        st.write(f"**Split:** {exp['amount']/len(exp['shared_with']):.2f} {CURRENCY} each")
-                        if exp['notes']:
-                            st.write(f"**Notes:** {exp['notes']}")
-                        
-                        if st.button("🗑️ Delete", key=f"del_exp_{i}"):
-                            st.session_state.expenses.remove(exp)
-                            st.rerun()
+            if expenses:
+                for exp in reversed(expenses):
+                    with st.expander(f"{exp['Date']} - {exp['Description']} ({exp['Amount']} {CURRENCY})"):
+                        st.write(f"**Paid by:** {exp['Payer']}")
+                        st.write(f"**Shared by:** {exp['Shared With']}")
+                        if exp.get('Notes'):
+                            st.write(f"**Notes:** {exp['Notes']}")
             else:
                 st.info("No expenses yet")
         
         with col2:
             st.subheader("💸 Payment History")
-            if st.session_state.payments:
-                for i, pay in enumerate(reversed(st.session_state.payments), 1):
-                    with st.expander(f"{pay['date']} - {pay['amount']:.2f} {CURRENCY}"):
-                        st.write(f"**From:** {pay['from']}")
-                        st.write(f"**To:** {pay['to']}")
-                        if pay['notes']:
-                            st.write(f"**Notes:** {pay['notes']}")
-                        
-                        if st.button("🗑️ Delete", key=f"del_pay_{i}"):
-                            st.session_state.payments.remove(pay)
-                            st.rerun()
+            if payments:
+                for pay in reversed(payments):
+                    with st.expander(f"{pay['Date']} - {pay['Amount']} {CURRENCY}"):
+                        st.write(f"**From:** {pay['From']}")
+                        st.write(f"**To:** {pay['To']}")
+                        if pay.get('Notes'):
+                            st.write(f"**Notes:** {pay['Notes']}")
             else:
                 st.info("No payments yet")
 
