@@ -63,10 +63,18 @@ def add_payment(sheet, date, from_person, to_person, amount, notes):
 def apply_custom_css():
     st.markdown("""
     <style>
-        #MainMenu {visibility: hidden;}
-        footer {visibility: hidden;}
-        header {visibility: hidden;}
-        .stDeployButton {display:none;}
+        #MainMenu {visibility: hidden !important;}
+        footer {visibility: hidden !important;}
+        header {visibility: hidden !important;}
+        .stDeployButton {display: none !important;}
+        .viewerBadge_container__1QSob {display: none !important;}
+        .styles_viewerBadge__1yB5_ {display: none !important;}
+        div[data-testid="stToolbar"] {display: none !important;}
+        div[data-testid="stDecoration"] {display: none !important;}
+        div[data-testid="stStatusWidget"] {display: none !important;}
+        #MainMenu {display: none !important;}
+        footer {display: none !important;}
+        header {display: none !important;}
         
         .stApp {
             background-color: #f5f7fa;
@@ -156,7 +164,8 @@ def main():
     st.set_page_config(
         page_title="Roommate Expense Tracker",
         page_icon="🏠",
-        layout="wide"
+        layout="wide",
+        initial_sidebar_state="collapsed"
     )
     
     apply_custom_css()
