@@ -4,18 +4,11 @@ from datetime import datetime
 import gspread
 from google.oauth2.service_account import Credentials
 
-# ============================================================================
-# CONFIGURATION
-# ============================================================================
 ROOMMATES = ["SAFI", "GANDOFLY", "LOLO", "JOJO", "BODY", "PAKI"]
 CURRENCY = "EGP" 
 
-# ============================================================================
-# GOOGLE SHEETS CONNECTION
-# ============================================================================
 @st.cache_resource
 def connect_to_sheet():
-    """Connect to Google Sheets."""
     try:
         credentials = Credentials.from_service_account_info(
             st.secrets["gcp_service_account"],
@@ -33,7 +26,6 @@ def connect_to_sheet():
         return None
 
 def read_expenses(sheet):
-    """Read expenses from Google Sheet."""
     try:
         worksheet = sheet.worksheet("Expenses")
         data = worksheet.get_all_records()
@@ -42,7 +34,6 @@ def read_expenses(sheet):
         return []
 
 def read_payments(sheet):
-    """Read payments from Google Sheet."""
     try:
         worksheet = sheet.worksheet("Payments")
         data = worksheet.get_all_records()
@@ -51,7 +42,6 @@ def read_payments(sheet):
         return []
 
 def add_expense(sheet, date, description, payer, amount, shared_with, notes):
-    """Add expense to Google Sheet."""
     try:
         worksheet = sheet.worksheet("Expenses")
         shared_str = ", ".join(shared_with)
@@ -62,7 +52,6 @@ def add_expense(sheet, date, description, payer, amount, shared_with, notes):
         return False
 
 def add_payment(sheet, date, from_person, to_person, amount, notes):
-    """Add payment to Google Sheet."""
     try:
         worksheet = sheet.worksheet("Payments")
         worksheet.append_row([date, from_person, to_person, float(amount), notes])
@@ -71,12 +60,14 @@ def add_payment(sheet, date, from_person, to_person, amount, notes):
         st.error(f"Error: {e}")
         return False
 
-# ============================================================================
-# CUSTOM CSS
-# ============================================================================
 def apply_custom_css():
     st.markdown("""
     <style>
+        #MainMenu {visibility: hidden;}
+        footer {visibility: hidden;}
+        header {visibility: hidden;}
+        .stDeployButton {display:none;}
+        
         .stApp {
             background-color: #f5f7fa;
         }
@@ -94,11 +85,7 @@ def apply_custom_css():
     </style>
     """, unsafe_allow_html=True)
 
-# ============================================================================
-# CALCULATION FUNCTIONS
-# ============================================================================
 def calculate_balances(expenses, payments):
-    """Calculate balances with selective sharing."""
     balances = {person: 0.0 for person in ROOMMATES}
     
     for expense in expenses:
@@ -128,7 +115,6 @@ def calculate_balances(expenses, payments):
     return balances
 
 def calculate_settlement(balances):
-    """Calculate settlement plan."""
     creditors = []
     debtors = []
     
@@ -166,9 +152,6 @@ def calculate_settlement(balances):
     
     return settlements
 
-# ============================================================================
-# MAIN APP
-# ============================================================================
 def main():
     st.set_page_config(
         page_title="Roommate Expense Tracker",
@@ -198,9 +181,6 @@ def main():
     
     tab1, tab2, tab3, tab4 = st.tabs(["📊 Dashboard", "➕ Add Expense", "💸 Add Payment", "📜 History"])
     
-    # ========================================================================
-    # TAB 1: DASHBOARD
-    # ========================================================================
     with tab1:
         col1, col2, col3 = st.columns(3)
         
@@ -241,9 +221,6 @@ def main():
             for settlement in settlements:
                 st.info(f"**{settlement['from']}** pays **{settlement['to']}**: {settlement['amount']:.2f} {CURRENCY}")
     
-    # ========================================================================
-    # TAB 2: ADD EXPENSE
-    # ========================================================================
     with tab2:
         st.subheader("➕ Add New Expense")
         
@@ -282,9 +259,6 @@ def main():
                         st.balloons()
                         st.rerun()
     
-    # ========================================================================
-    # TAB 3: ADD PAYMENT
-    # ========================================================================
     with tab3:
         st.subheader("💸 Record Payment")
         
@@ -314,9 +288,6 @@ def main():
                         st.success(f"✅ Payment recorded! {payment_from} paid {payment_amount:.2f} {CURRENCY} to {payment_to}")
                         st.rerun()
     
-    # ========================================================================
-    # TAB 4: HISTORY
-    # ========================================================================
     with tab4:
         col1, col2 = st.columns(2)
         
